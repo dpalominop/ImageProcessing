@@ -4,6 +4,10 @@
 #include <QFileDialog>
 #include <QString>
 #include <iostream>
+#include <fstream>
+#include <array>
+#include <vector>
+#include <iterator>
 
 image_interface::image_interface(QLabel *const srclbl, QLabel *const dstlbl,
                                  QImage *const srcimg, QImage *const dstimg,
@@ -20,11 +24,52 @@ image_interface::image_interface(QLabel *const srclbl, QLabel *const dstlbl,
 void image_interface::load()
 {
     QString filename = QFileDialog::getOpenFileName(0, "Load", "", "Images (*.png *.bmp *.jpg *.jpeg *.gif)");
-    if (!filename.isEmpty())
+    std::ifstream bmp(filename.toStdString().c_str(), std::ios::binary);
+
+    static constexpr size_t HEADER_SIZE = 54;
+    std::array<char, HEADER_SIZE> header;
+
+//    if (!filename.isEmpty())
+    if(bmp)
     {
-        srcImage->load(filename);
+//        QFileInfo fi(filename);
+
+        /*if(fi.suffix() == "bmp"){
+            srcImage->load(filename);
+        }else{
+            srcImage->load(filename);
+        }*/
+
+
+        bmp.read(header.data(), header.size());
+
+        auto fileSize = *reinterpret_cast<uint32_t *>(&header[2]);
+        auto dataOffset = *reinterpret_cast<uint32_t *>(&header[10]);
+        auto width = *reinterpret_cast<uint32_t *>(&header[18]);
+        auto height = *reinterpret_cast<uint32_t *>(&header[22]);
+        auto depth = *reinterpret_cast<uint16_t *>(&header[28]);
+
+        std::vector<char> img(dataOffset - HEADER_SIZE);
+        bmp.read(img.data(), img.size());
+
+        auto dataSize = ((width * 3 + 3) & (~3)) * height;
+        auto width_ext = ((width * 3 + 3) & (~3));
+        img.resize(dataSize);
+        bmp.read(img.data(), img.size());
+
+        QImage qimg(width, height, QImage::Format_RGB32);
+        srcImage = &qimg;
+
+        for (auto i=0; i<height; i++){
+            for(auto j=0; j<width; j++){
+                QRgb value = qRgb(img[i*width_ext+j*3+2], img[i*width_ext+j*3+1], img[i*width_ext+j*3]);
+                srcImage->setPixel(j, height -1 -i, value);
+            }
+        }
+
         emit print_message(QString("loaded image ") + QString::number(srcImage->height()) + QString("x") + QString::number(srcImage->width()));
         updateSrcImage();
+
     }
     return;
 }
