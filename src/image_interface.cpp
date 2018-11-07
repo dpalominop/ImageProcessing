@@ -26,45 +26,73 @@ void image_interface::load()
     QString filename = QFileDialog::getOpenFileName(0, "Load", "", "Images (*.png *.bmp *.jpg *.jpeg *.gif)");
     std::ifstream bmp(filename.toStdString().c_str(), std::ios::binary);
 
-    static constexpr size_t HEADER_SIZE = 54;
-    std::array<char, HEADER_SIZE> header;
+    if(!filename.isEmpty() && bmp){
 
-//    if (!filename.isEmpty())
-    if(bmp)
-    {
-//        QFileInfo fi(filename);
-
-        /*if(fi.suffix() == "bmp"){
-            srcImage->load(filename);
-        }else{
-            srcImage->load(filename);
-        }*/
-
+        static constexpr size_t HEADER_SIZE = 54;
+        std::array<char, HEADER_SIZE> header;
 
         bmp.read(header.data(), header.size());
 
-        auto fileSize = *reinterpret_cast<uint32_t *>(&header[2]);
-        auto dataOffset = *reinterpret_cast<uint32_t *>(&header[10]);
-        auto width = *reinterpret_cast<uint32_t *>(&header[18]);
-        auto height = *reinterpret_cast<uint32_t *>(&header[22]);
-        auto depth = *reinterpret_cast<uint16_t *>(&header[28]);
+        if(header[0] == 'B' && header[1]== 'M'){
+            auto fileSize = *reinterpret_cast<uint32_t *>(&header[2]);
+            auto dataOffset = *reinterpret_cast<uint32_t *>(&header[10]);
+            auto headerSize = *reinterpret_cast<uint32_t *>(&header[14]);
+            auto width = *reinterpret_cast<uint32_t *>(&header[18]);
+            auto height = *reinterpret_cast<uint32_t *>(&header[22]);
+            auto depth = *reinterpret_cast<uint16_t *>(&header[28]);
 
-        std::vector<char> img(dataOffset - HEADER_SIZE);
-        bmp.read(img.data(), img.size());
+            std::vector<char> img(dataOffset - HEADER_SIZE);
+            bmp.read(img.data(), img.size());
 
-        auto dataSize = ((width * 3 + 3) & (~3)) * height;
-        auto width_ext = ((width * 3 + 3) & (~3));
-        img.resize(dataSize);
-        bmp.read(img.data(), img.size());
+            switch (depth) {
+                case 4:
+                {
+                    auto dataSize = ((width/2 + 3) & (~3)) * height;
+                    auto width_ext = ((width/2 + 3) & (~3));
+                    img.resize(dataSize);
+                    bmp.read(img.data(), img.size());
 
-        QImage qimg(width, height, QImage::Format_RGB32);
-        srcImage = &qimg;
+                    QVector<QRgb> colorTable(16); //our grayscale palette
+                    for (int i = 0; i < 256; i+=16)
+                         colorTable[i/16] = qRgb(i, i, i); //build palette
 
-        for (auto i=0; i<height; i++){
-            for(auto j=0; j<width; j++){
-                QRgb value = qRgb(img[i*width_ext+j*3+2], img[i*width_ext+j*3+1], img[i*width_ext+j*3]);
-                srcImage->setPixel(j, height -1 -i, value);
+                    QImage qimg(width, height, QImage::Format_Indexed8);
+                    qimg.setColorCount(16);
+                    qimg.setColorTable(colorTable);
+                    srcImage->operator=(qimg);
+
+                    for (auto i=0; i<height; i++){
+                        for(auto j=0; j<width/2; j++){
+                            char value = img[i*width_ext+j];
+                            srcImage->setPixel(j*2, height -1 -i, value >> 4);
+                            srcImage->setPixel(j*2+1, height -1 -i, value & 0x0F);
+                        }
+                    }
+                    break;
+                }
+                case 24:
+                case 32:
+                {
+                    auto dataSize = ((width * 3 + 3) & (~3)) * height;
+                    auto width_ext = ((width * 3 + 3) & (~3));
+                    img.resize(dataSize);
+                    bmp.read(img.data(), img.size());
+
+                    QImage qimg(width, height, QImage::Format_RGB32);
+                    srcImage->operator=(qimg);
+
+                    for (auto i=0; i<height; i++){
+                        for(auto j=0; j<width; j++){
+                            QRgb value = qRgb(img[i*width_ext+j*3+2], img[i*width_ext+j*3+1], img[i*width_ext+j*3]);
+                            srcImage->setPixel(j, height -1 -i, value);
+                        }
+                    }
+                    break;
+                }
             }
+
+        }else{
+            srcImage->load(filename);
         }
 
         emit print_message(QString("loaded image ") + QString::number(srcImage->height()) + QString("x") + QString::number(srcImage->width()));
